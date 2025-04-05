@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rhythm Bar Game</title>
+    <style>
+        body { margin: 0; background-color: #222; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { border: 1px solid #fff; } /* Optional: Just to see canvas boundary */
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+</head>
+<body>
+
+<script>
+// --- Constants ---
+const GAME_WIDTH = 480;
+const GAME_HEIGHT = 640;
+const BAR_Y_POSITION = GAME_HEIGHT - 50;
+const BAR_BASE_HEIGHT = 20;
+const BAR_BASE_WIDTH = 100;
+const BPM = 120;
+const BEAT_INTERVAL_MS = 60000 / BPM;
+
+// Bar Scaling
+const BAR_MIN_SCALE_X = 0.8;
+const BAR_MAX_SCALE_X = 1.2;
+const BOOST_MAX_SCALE_X = 2.5;
+const BOOST_SHRINK_DURATION = 4000;
+const BOOST_EXPAND_DURATION = 500; // Time to expand boost (ms)
+
+// Boost System
+const BOOST_MAX = 100;
+const BOOST_START = BOOST_MAX;
+const BOOST_CONSUMPTION_RATE = 50;
+const BOOST_PASSIVE_RECHARGE_RATE = 5;
+const BOOST_RECHARGE_ON_CATCH = 35;
+
+// Item System
+const ITEM_SPAWN_RATE_MS = 1000;
+const ITEM_SPEED = 150;
+const ITEM_SIZE = 20;
+const ITEM_SPAWN_PAIR_CHANCE = 0.15;
+// --- MODIFIED: Added 'life' type probability ---
+const ITEM_TYPE_PROBABILITY = { points: 0.75, boost: 0.15, life: 0.10 }; // Must add up to 1.0
+
+// Life System
+const LIFE_MAX = 100;
+const LIFE_START = LIFE_MAX;
+const LIFE_COST_PER_MISS = 20;
+const LIFE_REPLENISH_ON_CATCH = 15; // --- NEW: Health gained from red items ---
+
+// Colors
+const BAR_COLOR = 0x00ff00;
+const ITEM_COLOR_POINTS = 0x00ff00; // Green
+const ITEM_COLOR_BOOST = 0x00aaff;  // Blue
+const ITEM_COLOR_LIFE = 0xff0000;   // --- NEW: Red ---
+const BOOST_BAR_COLOR = 0x00aaff;
+const BOOST_BAR_BG_COLOR = 0x444444;
+const LIFE_BAR_COLOR = 0xff0000;
+const LIFE_BAR_BG_COLOR = 0x444444;
+
+class GameScene extends Phaser.Scene {
+    constructor() {
+        super('GameScene');
+        console.log("GameScene constructor");
+
+        // Game state variables
+        this.bar = null;
+        this.items = null;
+        this.score = 0;
+        this.scoreText = null;
+        this.boost = BOOST_START;
+        this.boostMeterBg = null;
+        this.boostMeterFill = null;
+        this.isPointerDown = false;
+        this.isBoosting = false;
+        this.lastBeatTime = 0;
+        this.updateCounter = 0;
+        this.isShrinkingFromBoost = false;
+        this.shrinkStartTime = 0;
+        this.scaleOnBoostRelease = 1;
+        this.isExpandingToBoost = false;
+        this.expandStartTime = 0;
+        this.scaleOnBoostStart = 1;
+        this.currentLife = LIFE_START;
+        this.lifeMeterBg = null;
+        this.lifeMeterFill = null;
+        this.isGameOver = false;
+        this.gameOverText = null;
+    }
+
+    preload() {
+        console.log("preload starting");
+        this.load.audio('beatSound', 'https://urbg-rnilsarks-projects.vercel.app/assets/beat.mp3');
+        // this.load.audio('catchSound', 'assets/pop.mp3');
+        console.log("preload finished");
+    }
+
+    create() {
+        console.log("create starting");
+        this.cameras.main.setBackgroundColor('#1a1a1a');
+
+        // --- Player Bar ---
+        this.bar = this.add.rectangle(GAME_WIDTH / 2, BAR_Y_POSITION, BAR_BASE_WIDTH, BAR_BASE_HEIGHT, BAR_COLOR);
+        this.bar.scaleX = 1;
+        this.physics.add.existing(this.bar);
+        if (this.bar.body) {
+             this.bar.body.setImmovable(true).allowGravity = false;
+        } else { console.error("ERROR: Bar body not created!"); }
+        this.bar.baseWidth = BAR_BASE_WIDTH;
+
+        // --- Falling Items Group ---
+        this.items = this.physics.add.group({
+            allowGravity: false,
+            classType: Phaser.GameObjects.Rectangle
+        });
+        console.log("Items group created with classType Rectangle.");
+
+        // Timer to spawn items
+        this.itemSpawnTimer = this.time.addEvent({ delay: ITEM_SPAWN_RATE_MS, callback: this.spawnItem, callbackScope: this, loop: true });
+        console.log("Item spawn timer added:", this.itemSpawnTimer ? 'OK' : 'Failed');
+
+        // --- Score Display ---
+        this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#ffffff' }).setDepth(5);
+
+        // --- Boost Meter ---
+        const meterWidth = 150;
+        const meterHeight = 15;
+        const boostMeterX = 10;
+        const boostMeterY = 50;
+        this.boostMeterBg = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_BG_COLOR).setOrigin(0, 0.5);
+        this.boostMeterFill = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_COLOR).setOrigin(0, 0.5);
+        console.log("Boost meter added.");
+
+        // --- Life Meter ---
+        const lifeMeterX = GAME_WIDTH - meterWidth - 10;
+        const lifeMeterY = 50;
+        this.lifeMeterBg = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_BG_COLOR).setOrigin(0, 0.5);
+        this.lifeMeterFill = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_COLOR).setOrigin(0, 0.5);
+        console.log("Life meter added.");
+
+        // --- Input Handling ---
+        this.input.on('pointerdown', () => {
+            if (this.isGameOver) return;
+            this.isPointerDown = true;
+            if (this.isShrinkingFromBoost) {
+                this.isShrinkingFromBoost = false;
+                // console.log("Shrink cancelled by pointerdown");
+            }
+        });
+        this.input.on('pointerup', () => {
+            if (this.isGameOver) return;
+            this.isPointerDown = false;
+            // Stop boost/expansion handled in update loop
+        });
+        console.log("Input listeners added.");
+
+        // --- Collision Detection ---
+        this.physics.add.overlap(this.bar, this.items, this.handleCatch, null, this);
+        console.log("Physics overlap added.");
+
+        // Initialize beat time
+        this.lastBeatTime = this.time.now;
+
+        // --- Start Beat Sound Looping ---
+        this.sound.play('beatSound', { loop: true, volume: 0.5 });
+        console.log("Looping beat sound started.");
+
+        // --- Game Over Text (initially hidden) ---
+        this.gameOverText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'GAME OVER', {
+            fontSize: '48px', fill: '#ff0000', stroke: '#ffffff', strokeThickness: 4
+        }).setOrigin(0.5).setVisible(false).setDepth(100);
+
+        console.log("create finished - All setup should be complete.");
+    }
+
+    update(time, delta) {
+        if (this.isGameOver) { return; }
+
+        this.updateCounter++;
+        if (!this.bar || !this.bar.body) { return; }
+
+        // --- Player Bar Movement ---
+        const pointerX = this.input.activePointer.x;
+        const barHalfWidth = this.bar.displayWidth / 2;
+        this.bar.x = Phaser.Math.Clamp(pointerX, barHalfWidth, GAME_WIDTH - barHalfWidth);
+
+        // --- Boosting Logic with Expansion Phase ---
+        if (this.isPointerDown && this.boost > 0 && !this.isBoosting && !this.isShrinkingFromBoost) {
+            this.isBoosting = true;
+            this.isExpandingToBoost = true;
+            this.expandStartTime = time;
+            this.scaleOnBoostStart = this.bar.scaleX;
+        }
+
+        if (this.isBoosting) {
+            this.boost -= BOOST_CONSUMPTION_RATE * (delta / 1000);
+            this.boost = Math.max(0, this.boost);
+        }
+
+        if ((!this.isPointerDown || this.boost <= 0) && this.isBoosting) {
+             this.isBoosting = false;
+             this.isExpandingToBoost = false;
+             this.isShrinkingFromBoost = true;
+             this.shrinkStartTime = time;
+             this.scaleOnBoostRelease = this.bar.scaleX;
+        }
+        else if (!this.isPointerDown && !this.isBoosting && !this.isShrinkingFromBoost) {
+             if (this.boost < BOOST_MAX) {
+                 this.boost += BOOST_PASSIVE_RECHARGE_RATE * (delta / 1000);
+                 this.boost = Math.min(BOOST_MAX, this.boost);
+             }
+        }
+
+         // --- Rhythm & Bar Scaling ---
+        const timeSinceLastBeat = (time - this.lastBeatTime);
+        const beatProgress = (timeSinceLastBeat % BEAT_INTERVAL_MS) / BEAT_INTERVAL_MS;
+        const pulseAmount = (Math.cos(beatProgress * Math.PI * 2) + 1) / 2; // Peaks ON the beat
+        const baseTargetScaleX = BAR_MIN_SCALE_X + (BAR_MAX_SCALE_X - BAR_MIN_SCALE_X) * pulseAmount;
+
+        let finalTargetScaleX = baseTargetScaleX;
+
+        if (this.isExpandingToBoost) {
+            const elapsedExpandTime = time - this.expandStartTime;
+            if (elapsedExpandTime < BOOST_EXPAND_DURATION) {
+                const expandProgress = elapsedExpandTime / BOOST_EXPAND_DURATION;
+                finalTargetScaleX = Phaser.Math.Interpolation.Linear([this.scaleOnBoostStart, BOOST_MAX_SCALE_X], expandProgress);
+                finalTargetScaleX = Math.max(finalTargetScaleX, baseTargetScaleX);
+            } else {
+                this.isExpandingToBoost = false;
+                finalTargetScaleX = BOOST_MAX_SCALE_X;
+            }
+        } else if (this.isBoosting) {
+             finalTargetScaleX = BOOST_MAX_SCALE_X;
+        } else if (this.isShrinkingFromBoost) {
+            const elapsedShrinkTime = time - this.shrinkStartTime;
+            if (elapsedShrinkTime < BOOST_SHRINK_DURATION) {
+                const shrinkProgress = elapsedShrinkTime / BOOST_SHRINK_DURATION;
+                finalTargetScaleX = Phaser.Math.Interpolation.Linear([this.scaleOnBoostRelease, baseTargetScaleX], shrinkProgress);
+                finalTargetScaleX = Math.max(finalTargetScaleX, baseTargetScaleX);
+            } else {
+                this.isShrinkingFromBoost = false;
+                finalTargetScaleX = baseTargetScaleX;
+            }
+        }
+
+        if (!isNaN(finalTargetScaleX)) {
+             this.bar.scaleX = finalTargetScaleX;
+        } else {
+             if (this.updateCounter % 60 === 1) console.warn("finalTargetScaleX is NaN!");
+             this.bar.scaleX = 1;
+        }
+
+        // --- Beat Synchronization Check (Visual Only) ---
+        if (timeSinceLastBeat >= BEAT_INTERVAL_MS) {
+             this.lastBeatTime = time;
+        }
+
+        // --- Update UI Bars ---
+        if (this.boostMeterFill && this.boostMeterBg) {
+             this.boostMeterFill.width = Phaser.Math.Clamp((this.boost / BOOST_MAX), 0, 1) * this.boostMeterBg.width;
+        }
+        if (this.lifeMeterFill && this.lifeMeterBg) {
+             const lifePercent = Phaser.Math.Clamp((this.currentLife / LIFE_MAX), 0, 1);
+             this.lifeMeterFill.width = lifePercent * this.lifeMeterBg.width;
+        }
+
+        // --- Update Score Text ---
+        if (this.scoreText) { this.scoreText.setText('Score: ' + this.score); }
+
+        // --- Item Cleanup & Life Loss ---
+         if (this.items) {
+             this.items.children.each(item => {
+                 if (item.active && item.y > GAME_HEIGHT + item.displayHeight) {
+                     // Only lose life for missing point items
+                     if (item.itemType === 'points') {
+                         this.currentLife -= LIFE_COST_PER_MISS;
+                         this.currentLife = Math.max(0, this.currentLife);
+                     }
+                     this.items.killAndHide(item);
+                     if(item.body) { item.body.stop(); item.body.enable = false; }
+                 }
+             });
+         }
+
+         // --- Game Over Check ---
+         if (this.currentLife <= 0 && !this.isGameOver) {
+             this.triggerGameOver();
+             return; // Stop further updates this frame
+         }
+    }
+
+    createSingleItem(x, y, itemType) {
+        const item = this.items.get(x, y);
+        if (item) {
+            item.setActive(true).setVisible(true);
+            item.itemType = itemType; // Store the type
+
+            // --- MODIFIED: Set fill color based on three types ---
+            let itemColor = ITEM_COLOR_POINTS; // Default to points color
+            if (itemType === 'boost') {
+                itemColor = ITEM_COLOR_BOOST;
+            } else if (itemType === 'life') {
+                itemColor = ITEM_COLOR_LIFE;
+            }
+            item.setFillStyle(itemColor);
+            // ---
+
+            item.setSize(ITEM_SIZE, ITEM_SIZE);
+            item.setDisplaySize(ITEM_SIZE, ITEM_SIZE);
+
+            this.physics.world.enable(item);
+            if(item.body) {
+                item.body.enable = true;
+                item.body.reset(x, y);
+                item.body.setSize(ITEM_SIZE, ITEM_SIZE);
+                item.body.velocity.y = ITEM_SPEED;
+            } else { console.error("Item body not available after creation/reuse!"); }
+        } else { console.warn("Failed to create/reuse item"); }
+        return item;
+    }
+
+
+    spawnItem() {
+        try {
+            // --- MODIFIED: Determine item type based on 3 probabilities ---
+            let itemType = 'points'; // Default
+            const rand = Phaser.Math.FloatBetween(0, 1);
+
+            if (rand < ITEM_TYPE_PROBABILITY.life) { // Check for life first (lowest probability)
+                 itemType = 'life';
+            } else if (rand < ITEM_TYPE_PROBABILITY.life + ITEM_TYPE_PROBABILITY.boost) { // Check for boost next
+                 itemType = 'boost';
+            } // Else it remains 'points'
+            // ---
+
+            if (Phaser.Math.FloatBetween(0, 1) < ITEM_SPAWN_PAIR_CHANCE) {
+                // Spawn a pair (both same type)
+                const minSpread = (BAR_BASE_WIDTH * BAR_MAX_SCALE_X) + ITEM_SIZE * 0.5;
+                const maxSpread = (BAR_BASE_WIDTH * BOOST_MAX_SCALE_X) - ITEM_SIZE * 1.5;
+                const safeMaxSpread = Math.max(minSpread + ITEM_SIZE, maxSpread);
+                if (safeMaxSpread > minSpread) {
+                    const spread = Phaser.Math.Between(minSpread, safeMaxSpread);
+                    const centerMinX = Math.max(ITEM_SIZE / 2, spread / 2 + ITEM_SIZE / 2);
+                    const centerMaxX = Math.min(GAME_WIDTH - ITEM_SIZE / 2, GAME_WIDTH - spread / 2 - ITEM_SIZE / 2);
+                    if (centerMaxX > centerMinX) {
+                         const centerX = Phaser.Math.Between(centerMinX, centerMaxX);
+                         const x1 = centerX - spread / 2;
+                         const x2 = centerX + spread / 2;
+                         const y = -ITEM_SIZE;
+                         this.createSingleItem(x1, y, itemType);
+                         this.createSingleItem(x2, y, itemType);
+                    } else { this.createSingleItem(Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2), -ITEM_SIZE, itemType); }
+                } else { this.createSingleItem(Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2), -ITEM_SIZE, itemType); }
+            } else {
+                // Spawn a single item
+                const x = Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2);
+                const y = -ITEM_SIZE;
+                this.createSingleItem(x, y, itemType);
+            }
+        } catch (error) { console.error("ERROR in spawnItem:", error); }
+    }
+
+
+    handleCatch(bar, item) {
+        if (item && item.active) {
+             // --- Play Catch Sound ---
+             // this.sound.play('catchSound', { volume: 0.7 });
+             // ---
+
+             // --- MODIFIED: Check item type for reward ---
+             if (item.itemType === 'points') {
+                 this.score += 10;
+             } else if (item.itemType === 'boost') {
+                 this.boost = Math.min(BOOST_MAX, this.boost + BOOST_RECHARGE_ON_CATCH);
+             } else if (item.itemType === 'life') { // --- NEW: Handle life item catch ---
+                 this.currentLife = Math.min(LIFE_MAX, this.currentLife + LIFE_REPLENISH_ON_CATCH);
+             }
+             // ---
+
+             // Recycle the caught item
+             this.items.killAndHide(item);
+             if (item.body) {
+                 item.body.stop();
+                 item.body.enable = false;
+             }
+        }
+    }
+
+    triggerGameOver() {
+        console.log("GAME OVER triggered!");
+        this.isGameOver = true;
+
+        this.physics.pause();
+        this.itemSpawnTimer.paused = true;
+        this.sound.stopByKey('beatSound');
+        if (this.lifeMeterFill) this.lifeMeterFill.width = 0; // Ensure bar is empty visually
+        if(this.gameOverText) this.gameOverText.setVisible(true);
+    }
+}
+
+// --- Phaser Game Configuration ---
+const config = {
+    type: Phaser.AUTO,
+    width: GAME_WIDTH,
+    height: GAME_HEIGHT,
+    parent: 'phaser-game',
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 0 }, debug: false }
+    },
+    audio: { disableWebAudio: false },
+    scene: [GameScene]
+};
+
+console.log("Creating Phaser game instance...");
+try {
+     const game = new Phaser.Game(config);
+     console.log("Phaser game instance created.");
+} catch (error) { console.error("FATAL ERROR creating Phaser game:", error); }
+
+</script>
+
+</body>
+</html>
