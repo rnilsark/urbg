@@ -5,12 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rhythm Bar Game</title>
     <style>
-        body { margin: 0; background-color: #222; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        body { margin: 0; background-color: #222; display: flex; flex-direction: column; /* Arrange canvas and badges vertically */ justify-content: center; align-items: center; min-height: 100vh; font-family: sans-serif; }
         canvas { border: 1px solid #fff; } /* Optional: Just to see canvas boundary */
+        /* --- NEW: Basic styling for badges --- */
+        #badges-container {
+             margin-top: 15px;
+             padding: 10px;
+             max-width: 480px; /* Match game width */
+             text-align: left;
+        }
+        #badges-container p {
+            color: lightgreen;
+            margin: 3px 0;
+            font-size: 14px;
+            word-wrap: break-word;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 </head>
 <body>
+
+<div id="badges-container">
+    <h4 style="color: white; margin-bottom: 5px; text-align: center;">Level Badges</h4>
+</div>
 
 <script>
 // --- Constants ---
@@ -27,7 +44,7 @@ const BAR_MIN_SCALE_X = 0.8;
 const BAR_MAX_SCALE_X = 1.2;
 const BOOST_MAX_SCALE_X = 2.5;
 const BOOST_SHRINK_DURATION = 4000;
-const BOOST_EXPAND_DURATION = 500; // Time to expand boost (ms)
+const BOOST_EXPAND_DURATION = 500;
 
 // Boost System
 const BOOST_MAX = 100;
@@ -37,24 +54,30 @@ const BOOST_PASSIVE_RECHARGE_RATE = 5;
 const BOOST_RECHARGE_ON_CATCH = 35;
 
 // Item System
-const ITEM_SPAWN_RATE_MS = 1000;
+const BASE_ITEM_SPAWN_RATE_MS = 1000; // --- NEW: Base spawn rate ---
+const MIN_ITEM_SPAWN_RATE_MS = 300;  // --- NEW: Fastest spawn rate ---
+const ITEM_SPAWN_RATE_DECREASE_PER_LEVEL = 100; // --- NEW: How much faster per level ---
 const ITEM_SPEED = 150;
 const ITEM_SIZE = 20;
-const ITEM_SPAWN_PAIR_CHANCE = 0.15;
-// --- MODIFIED: Added 'life' type probability ---
-const ITEM_TYPE_PROBABILITY = { points: 0.75, boost: 0.15, life: 0.10 }; // Must add up to 1.0
+const BASE_ITEM_SPAWN_PAIR_CHANCE = 0.15; // --- NEW: Base pair chance ---
+const MAX_ITEM_SPAWN_PAIR_CHANCE = 0.50;  // --- NEW: Max pair chance ---
+const ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL = 0.05; // --- NEW: Pair chance increase per level ---
+const ITEM_TYPE_PROBABILITY = { points: 0.75, boost: 0.15, life: 0.10 };
 
 // Life System
 const LIFE_MAX = 100;
 const LIFE_START = LIFE_MAX;
 const LIFE_COST_PER_MISS = 20;
-const LIFE_REPLENISH_ON_CATCH = 15; // --- NEW: Health gained from red items ---
+const LIFE_REPLENISH_ON_CATCH = 15;
+
+// --- NEW: Leveling System ---
+const LEVEL_THRESHOLDS = [300, 800, 1500, 2500, 4000]; // Score needed for levels 2, 3, 4, 5, 6
 
 // Colors
 const BAR_COLOR = 0x00ff00;
-const ITEM_COLOR_POINTS = 0x00ff00; // Green
-const ITEM_COLOR_BOOST = 0x00aaff;  // Blue
-const ITEM_COLOR_LIFE = 0xff0000;   // --- NEW: Red ---
+const ITEM_COLOR_POINTS = 0x00ff00;
+const ITEM_COLOR_BOOST = 0x00aaff;
+const ITEM_COLOR_LIFE = 0xff0000;
 const BOOST_BAR_COLOR = 0x00aaff;
 const BOOST_BAR_BG_COLOR = 0x444444;
 const LIFE_BAR_COLOR = 0xff0000;
@@ -88,6 +111,10 @@ class GameScene extends Phaser.Scene {
         this.lifeMeterFill = null;
         this.isGameOver = false;
         this.gameOverText = null;
+        // --- NEW: Level and difficulty state ---
+        this.currentLevel = 1;
+        this.currentPairChance = BASE_ITEM_SPAWN_PAIR_CHANCE;
+        this.itemSpawnTimer = null; // Initialize timer reference
     }
 
     preload() {
@@ -117,8 +144,13 @@ class GameScene extends Phaser.Scene {
         });
         console.log("Items group created with classType Rectangle.");
 
-        // Timer to spawn items
-        this.itemSpawnTimer = this.time.addEvent({ delay: ITEM_SPAWN_RATE_MS, callback: this.spawnItem, callbackScope: this, loop: true });
+        // Timer to spawn items - Initialize with base rate
+        this.itemSpawnTimer = this.time.addEvent({
+             delay: BASE_ITEM_SPAWN_RATE_MS, // Start with base delay
+             callback: this.spawnItem,
+             callbackScope: this,
+             loop: true
+        });
         console.log("Item spawn timer added:", this.itemSpawnTimer ? 'OK' : 'Failed');
 
         // --- Score Display ---
@@ -144,15 +176,11 @@ class GameScene extends Phaser.Scene {
         this.input.on('pointerdown', () => {
             if (this.isGameOver) return;
             this.isPointerDown = true;
-            if (this.isShrinkingFromBoost) {
-                this.isShrinkingFromBoost = false;
-                // console.log("Shrink cancelled by pointerdown");
-            }
+            if (this.isShrinkingFromBoost) { this.isShrinkingFromBoost = false; }
         });
         this.input.on('pointerup', () => {
             if (this.isGameOver) return;
             this.isPointerDown = false;
-            // Stop boost/expansion handled in update loop
         });
         console.log("Input listeners added.");
 
@@ -171,6 +199,10 @@ class GameScene extends Phaser.Scene {
         this.gameOverText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'GAME OVER', {
             fontSize: '48px', fill: '#ff0000', stroke: '#ffffff', strokeThickness: 4
         }).setOrigin(0.5).setVisible(false).setDepth(100);
+
+        // --- Initialize difficulty based on starting level (level 1) ---
+        this.currentPairChance = BASE_ITEM_SPAWN_PAIR_CHANCE;
+        // Timer delay already set to base
 
         console.log("create finished - All setup should be complete.");
     }
@@ -273,7 +305,6 @@ class GameScene extends Phaser.Scene {
          if (this.items) {
              this.items.children.each(item => {
                  if (item.active && item.y > GAME_HEIGHT + item.displayHeight) {
-                     // Only lose life for missing point items
                      if (item.itemType === 'points') {
                          this.currentLife -= LIFE_COST_PER_MISS;
                          this.currentLife = Math.max(0, this.currentLife);
@@ -295,17 +326,12 @@ class GameScene extends Phaser.Scene {
         const item = this.items.get(x, y);
         if (item) {
             item.setActive(true).setVisible(true);
-            item.itemType = itemType; // Store the type
+            item.itemType = itemType;
 
-            // --- MODIFIED: Set fill color based on three types ---
-            let itemColor = ITEM_COLOR_POINTS; // Default to points color
-            if (itemType === 'boost') {
-                itemColor = ITEM_COLOR_BOOST;
-            } else if (itemType === 'life') {
-                itemColor = ITEM_COLOR_LIFE;
-            }
+            let itemColor = ITEM_COLOR_POINTS;
+            if (itemType === 'boost') { itemColor = ITEM_COLOR_BOOST; }
+            else if (itemType === 'life') { itemColor = ITEM_COLOR_LIFE; }
             item.setFillStyle(itemColor);
-            // ---
 
             item.setSize(ITEM_SIZE, ITEM_SIZE);
             item.setDisplaySize(ITEM_SIZE, ITEM_SIZE);
@@ -324,18 +350,17 @@ class GameScene extends Phaser.Scene {
 
     spawnItem() {
         try {
-            // --- MODIFIED: Determine item type based on 3 probabilities ---
-            let itemType = 'points'; // Default
+            let itemType = 'points';
             const rand = Phaser.Math.FloatBetween(0, 1);
+            const lifeProb = ITEM_TYPE_PROBABILITY.life;
+            const boostProb = ITEM_TYPE_PROBABILITY.boost;
 
-            if (rand < ITEM_TYPE_PROBABILITY.life) { // Check for life first (lowest probability)
-                 itemType = 'life';
-            } else if (rand < ITEM_TYPE_PROBABILITY.life + ITEM_TYPE_PROBABILITY.boost) { // Check for boost next
-                 itemType = 'boost';
-            } // Else it remains 'points'
-            // ---
+            if (rand < lifeProb) { itemType = 'life'; }
+            else if (rand < lifeProb + boostProb) { itemType = 'boost'; }
+            // else it remains 'points'
 
-            if (Phaser.Math.FloatBetween(0, 1) < ITEM_SPAWN_PAIR_CHANCE) {
+            // --- Use currentPairChance for difficulty scaling ---
+            if (Phaser.Math.FloatBetween(0, 1) < this.currentPairChance) {
                 // Spawn a pair (both same type)
                 const minSpread = (BAR_BASE_WIDTH * BAR_MAX_SCALE_X) + ITEM_SIZE * 0.5;
                 const maxSpread = (BAR_BASE_WIDTH * BOOST_MAX_SCALE_X) - ITEM_SIZE * 1.5;
@@ -369,15 +394,17 @@ class GameScene extends Phaser.Scene {
              // this.sound.play('catchSound', { volume: 0.7 });
              // ---
 
-             // --- MODIFIED: Check item type for reward ---
+             let gainedScore = 0; // Track score gained this catch
+
+             // Check item type for reward
              if (item.itemType === 'points') {
                  this.score += 10;
+                 gainedScore = 10; // Record score gain for level check
              } else if (item.itemType === 'boost') {
                  this.boost = Math.min(BOOST_MAX, this.boost + BOOST_RECHARGE_ON_CATCH);
-             } else if (item.itemType === 'life') { // --- NEW: Handle life item catch ---
+             } else if (item.itemType === 'life') {
                  this.currentLife = Math.min(LIFE_MAX, this.currentLife + LIFE_REPLENISH_ON_CATCH);
              }
-             // ---
 
              // Recycle the caught item
              this.items.killAndHide(item);
@@ -385,8 +412,58 @@ class GameScene extends Phaser.Scene {
                  item.body.stop();
                  item.body.enable = false;
              }
+
+             // --- NEW: Check for Level Up ---
+             if (gainedScore > 0) { // Only check if score actually increased
+                 this.checkForLevelUp();
+             }
+             // ---
         }
     }
+
+    // --- NEW: Level Up Check Function ---
+    checkForLevelUp() {
+        // Check if there's a next level defined and if score meets the threshold
+        if (this.currentLevel <= LEVEL_THRESHOLDS.length &&
+            this.score >= LEVEL_THRESHOLDS[this.currentLevel - 1]) {
+            this.levelUp();
+        }
+    }
+
+    // --- NEW: Level Up Logic Function ---
+    levelUp() {
+        const levelReached = this.currentLevel + 1; // The level we are entering
+        const scoreThreshold = LEVEL_THRESHOLDS[this.currentLevel - 1]; // The score just passed
+        console.log(`Level Up! Reached Level ${levelReached} at score ${this.score} (Threshold: ${scoreThreshold})`);
+
+        this.currentLevel = levelReached; // Increment level counter
+
+        // Display Badge (DOM Manipulation)
+        const badgeContainer = document.getElementById('badges-container');
+        if (badgeContainer) {
+            const badgeElement = document.createElement('p');
+            // Display the level number achieved and the score it was achieved at
+            badgeElement.textContent = `Level ${this.currentLevel -1} Reached (Score: ${scoreThreshold})`;
+            badgeContainer.appendChild(badgeElement);
+        } else {
+            console.warn("Badge container div not found in HTML.");
+        }
+
+        // Increase Difficulty
+        // 1. Increase spawn rate (decrease delay)
+        const newDelay = Math.max(MIN_ITEM_SPAWN_RATE_MS, BASE_ITEM_SPAWN_RATE_MS - (this.currentLevel - 1) * ITEM_SPAWN_RATE_DECREASE_PER_LEVEL);
+        if (this.itemSpawnTimer) {
+            this.itemSpawnTimer.delay = newDelay;
+            console.log(`Level ${this.currentLevel}: Spawn delay reduced to ${newDelay}ms`);
+        }
+
+        // 2. Increase pair spawn chance
+        this.currentPairChance = Math.min(MAX_ITEM_SPAWN_PAIR_CHANCE, BASE_ITEM_SPAWN_PAIR_CHANCE + (this.currentLevel - 1) * ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL);
+        console.log(`Level ${this.currentLevel}: Pair spawn chance increased to ${(this.currentPairChance * 100).toFixed(0)}%`);
+
+        // Add other difficulty increases here (e.g., item speed) if desired
+    }
+
 
     triggerGameOver() {
         console.log("GAME OVER triggered!");
@@ -395,7 +472,7 @@ class GameScene extends Phaser.Scene {
         this.physics.pause();
         this.itemSpawnTimer.paused = true;
         this.sound.stopByKey('beatSound');
-        if (this.lifeMeterFill) this.lifeMeterFill.width = 0; // Ensure bar is empty visually
+        if (this.lifeMeterFill) this.lifeMeterFill.width = 0;
         if(this.gameOverText) this.gameOverText.setVisible(true);
     }
 }
@@ -405,7 +482,7 @@ const config = {
     type: Phaser.AUTO,
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
-    parent: 'phaser-game',
+    parent: 'phaser-game', // Optional: If you have a div with id="phaser-game" in your HTML
     physics: {
         default: 'arcade',
         arcade: { gravity: { y: 0 }, debug: false }
