@@ -2,35 +2,29 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
     <title>Rhythm Bar Game</title>
     <style>
-        body { margin: 0; background-color: #222; display: flex; flex-direction: column; /* Arrange canvas and badges vertically */ justify-content: center; align-items: center; min-height: 100vh; font-family: sans-serif; }
-        canvas { border: 1px solid #fff; } /* Optional: Just to see canvas boundary */
-        /* --- NEW: Basic styling for badges --- */
-        #badges-container {
-             margin-top: 15px;
-             padding: 10px;
-             max-width: 480px; /* Match game width */
-             text-align: left;
+        /* --- MODIFIED: Ensure body fills viewport and prevents scrolling --- */
+        body {
+            margin: 0;
+            background-color: #222;
+            /* display: flex; flex-direction: column; justify-content: center; align-items: center; */ /* Centering now handled by Phaser */
+            width: 100vw; /* Full viewport width */
+            height: 100vh; /* Full viewport height */
+            overflow: hidden; /* Prevent scrollbars if canvas slightly overflows */
+            font-family: sans-serif;
         }
-        #badges-container p {
-            color: lightgreen;
-            margin: 3px 0;
-            font-size: 14px;
-            word-wrap: break-word;
-        }
+        /* Canvas border is optional */
+        canvas { border: 1px solid #fff; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 </head>
 <body>
 
-<div id="badges-container">
-    <h4 style="color: white; margin-bottom: 5px; text-align: center;">Level Badges</h4>
-</div>
-
 <script>
 // --- Constants ---
+// These now define the game's internal design resolution
 const GAME_WIDTH = 480;
 const GAME_HEIGHT = 640;
 const BAR_Y_POSITION = GAME_HEIGHT - 50;
@@ -39,7 +33,7 @@ const BAR_BASE_WIDTH = 100;
 const BPM = 120;
 const BEAT_INTERVAL_MS = 60000 / BPM;
 
-// Bar Scaling
+// Bar Scaling / Animation
 const BAR_MIN_SCALE_X = 0.8;
 const BAR_MAX_SCALE_X = 1.2;
 const BOOST_MAX_SCALE_X = 2.5;
@@ -54,14 +48,14 @@ const BOOST_PASSIVE_RECHARGE_RATE = 5;
 const BOOST_RECHARGE_ON_CATCH = 35;
 
 // Item System
-const BASE_ITEM_SPAWN_RATE_MS = 1000; // --- NEW: Base spawn rate ---
-const MIN_ITEM_SPAWN_RATE_MS = 300;  // --- NEW: Fastest spawn rate ---
-const ITEM_SPAWN_RATE_DECREASE_PER_LEVEL = 100; // --- NEW: How much faster per level ---
+const BASE_ITEM_SPAWN_RATE_MS = 1000;
+const MIN_ITEM_SPAWN_RATE_MS = 300;
+const ITEM_SPAWN_RATE_DECREASE_PER_LEVEL = 100;
 const ITEM_SPEED = 150;
 const ITEM_SIZE = 20;
-const BASE_ITEM_SPAWN_PAIR_CHANCE = 0.15; // --- NEW: Base pair chance ---
-const MAX_ITEM_SPAWN_PAIR_CHANCE = 0.50;  // --- NEW: Max pair chance ---
-const ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL = 0.05; // --- NEW: Pair chance increase per level ---
+const BASE_ITEM_SPAWN_PAIR_CHANCE = 0.15;
+const MAX_ITEM_SPAWN_PAIR_CHANCE = 0.50;
+const ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL = 0.05;
 const ITEM_TYPE_PROBABILITY = { points: 0.75, boost: 0.15, life: 0.10 };
 
 // Life System
@@ -70,8 +64,11 @@ const LIFE_START = LIFE_MAX;
 const LIFE_COST_PER_MISS = 20;
 const LIFE_REPLENISH_ON_CATCH = 15;
 
-// --- NEW: Leveling System ---
-const LEVEL_THRESHOLDS = [300, 800, 1500, 2500, 4000]; // Score needed for levels 2, 3, 4, 5, 6
+// Leveling System
+const LEVEL_THRESHOLDS = [300, 800, 1500, 2500, 4000];
+const LEVEL_UP_FLASH_DURATION = 500;
+const LEVEL_UP_TEXT_FADE_DELAY = 500;
+const LEVEL_UP_TEXT_FADE_DURATION = 1500;
 
 // Colors
 const BAR_COLOR = 0x00ff00;
@@ -86,9 +83,7 @@ const LIFE_BAR_BG_COLOR = 0x444444;
 class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
-        console.log("GameScene constructor");
-
-        // Game state variables
+        // (Constructor remains the same)
         this.bar = null;
         this.items = null;
         this.score = 0;
@@ -109,15 +104,17 @@ class GameScene extends Phaser.Scene {
         this.currentLife = LIFE_START;
         this.lifeMeterBg = null;
         this.lifeMeterFill = null;
-        this.isGameOver = false;
         this.gameOverText = null;
-        // --- NEW: Level and difficulty state ---
         this.currentLevel = 1;
         this.currentPairChance = BASE_ITEM_SPAWN_PAIR_CHANCE;
-        this.itemSpawnTimer = null; // Initialize timer reference
+        this.itemSpawnTimer = null;
+        this.levelUpText = null;
+        this.gameState = 'prestart';
+        this.startButton = null;
     }
 
     preload() {
+        // (Preload remains the same)
         console.log("preload starting");
         this.load.audio('beatSound', 'https://urbg-rnilsarks-projects.vercel.app/assets/beat.mp3');
         // this.load.audio('catchSound', 'assets/pop.mp3');
@@ -125,8 +122,10 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
+        // (Create logic remains largely the same, positioning is relative to GAME_WIDTH/HEIGHT)
         console.log("create starting");
         this.cameras.main.setBackgroundColor('#1a1a1a');
+        this.gameState = 'prestart';
 
         // --- Player Bar ---
         this.bar = this.add.rectangle(GAME_WIDTH / 2, BAR_Y_POSITION, BAR_BASE_WIDTH, BAR_BASE_HEIGHT, BAR_COLOR);
@@ -134,103 +133,136 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.bar);
         if (this.bar.body) {
              this.bar.body.setImmovable(true).allowGravity = false;
+             this.bar.body.enable = false;
         } else { console.error("ERROR: Bar body not created!"); }
         this.bar.baseWidth = BAR_BASE_WIDTH;
+        this.bar.setVisible(false);
 
         // --- Falling Items Group ---
         this.items = this.physics.add.group({
             allowGravity: false,
             classType: Phaser.GameObjects.Rectangle
         });
-        console.log("Items group created with classType Rectangle.");
 
-        // Timer to spawn items - Initialize with base rate
+        // Timer created paused
         this.itemSpawnTimer = this.time.addEvent({
-             delay: BASE_ITEM_SPAWN_RATE_MS, // Start with base delay
+             delay: BASE_ITEM_SPAWN_RATE_MS,
              callback: this.spawnItem,
              callbackScope: this,
-             loop: true
+             loop: true,
+             paused: true
         });
-        console.log("Item spawn timer added:", this.itemSpawnTimer ? 'OK' : 'Failed');
 
         // --- Score Display ---
-        this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#ffffff' }).setDepth(5);
+        this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#ffffff' }).setDepth(5).setVisible(false);
 
         // --- Boost Meter ---
         const meterWidth = 150;
         const meterHeight = 15;
         const boostMeterX = 10;
         const boostMeterY = 50;
-        this.boostMeterBg = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_BG_COLOR).setOrigin(0, 0.5);
-        this.boostMeterFill = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_COLOR).setOrigin(0, 0.5);
-        console.log("Boost meter added.");
+        this.boostMeterBg = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_BG_COLOR).setOrigin(0, 0.5).setVisible(false);
+        this.boostMeterFill = this.add.rectangle(boostMeterX, boostMeterY, meterWidth, meterHeight, BOOST_BAR_COLOR).setOrigin(0, 0.5).setVisible(false);
 
         // --- Life Meter ---
         const lifeMeterX = GAME_WIDTH - meterWidth - 10;
         const lifeMeterY = 50;
-        this.lifeMeterBg = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_BG_COLOR).setOrigin(0, 0.5);
-        this.lifeMeterFill = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_COLOR).setOrigin(0, 0.5);
-        console.log("Life meter added.");
+        this.lifeMeterBg = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_BG_COLOR).setOrigin(0, 0.5).setVisible(false);
+        this.lifeMeterFill = this.add.rectangle(lifeMeterX, lifeMeterY, meterWidth, meterHeight, LIFE_BAR_COLOR).setOrigin(0, 0.5).setVisible(false);
 
         // --- Input Handling ---
         this.input.on('pointerdown', () => {
-            if (this.isGameOver) return;
+            if (this.gameState !== 'playing' || this.isGameOver) return;
             this.isPointerDown = true;
             if (this.isShrinkingFromBoost) { this.isShrinkingFromBoost = false; }
         });
         this.input.on('pointerup', () => {
-            if (this.isGameOver) return;
+            if (this.gameState !== 'playing' || this.isGameOver) return;
             this.isPointerDown = false;
         });
-        console.log("Input listeners added.");
 
         // --- Collision Detection ---
         this.physics.add.overlap(this.bar, this.items, this.handleCatch, null, this);
-        console.log("Physics overlap added.");
 
         // Initialize beat time
         this.lastBeatTime = this.time.now;
 
-        // --- Start Beat Sound Looping ---
-        this.sound.play('beatSound', { loop: true, volume: 0.5 });
-        console.log("Looping beat sound started.");
-
-        // --- Game Over Text (initially hidden) ---
+        // --- Game Over Text ---
         this.gameOverText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'GAME OVER', {
             fontSize: '48px', fill: '#ff0000', stroke: '#ffffff', strokeThickness: 4
         }).setOrigin(0.5).setVisible(false).setDepth(100);
 
-        // --- Initialize difficulty based on starting level (level 1) ---
-        this.currentPairChance = BASE_ITEM_SPAWN_PAIR_CHANCE;
-        // Timer delay already set to base
+        // --- Level Up Text ---
+        this.levelUpText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Level 2', {
+             fontSize: '48px', fill: '#ffff00', stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5).setVisible(false).setAlpha(0).setDepth(100);
 
-        console.log("create finished - All setup should be complete.");
+        // --- Initialize difficulty ---
+        this.currentPairChance = BASE_ITEM_SPAWN_PAIR_CHANCE;
+
+        // --- Create Start Button ---
+        this.startButton = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Start Game', {
+            fontSize: '40px', fill: '#fff', backgroundColor: '#333', padding: { x: 20, y: 10 }, align: 'center'
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this.startGame());
+
+        console.log("create finished - Waiting for Start Button.");
     }
 
+    startGame() {
+        // (startGame remains the same)
+        if (this.gameState !== 'prestart') { return; }
+        console.log("Starting game...");
+        this.gameState = 'playing';
+
+        if(this.startButton) this.startButton.destroy();
+        this.bar.setVisible(true);
+        if (this.bar.body) this.bar.body.enable = true;
+        this.scoreText.setVisible(true);
+        this.boostMeterBg.setVisible(true);
+        this.boostMeterFill.setVisible(true);
+        this.lifeMeterBg.setVisible(true);
+        this.lifeMeterFill.setVisible(true);
+
+        this.sound.play('beatSound', { loop: true, volume: 0.5 });
+        console.log("Looping beat sound started.");
+
+        if (this.itemSpawnTimer) {
+            this.itemSpawnTimer.paused = false;
+            console.log("Item spawn timer resumed.");
+        }
+        this.lastBeatTime = this.time.now;
+    }
+
+
     update(time, delta) {
-        if (this.isGameOver) { return; }
+        // (Update logic remains the same)
+        if (this.gameState !== 'playing' || this.isGameOver) {
+            return;
+        }
 
         this.updateCounter++;
         if (!this.bar || !this.bar.body) { return; }
 
-        // --- Player Bar Movement ---
-        const pointerX = this.input.activePointer.x;
+        // Use scale manager to get pointer relative to game canvas
+        const gamePointer = this.input.activePointer.positionToCamera(this.cameras.main);
         const barHalfWidth = this.bar.displayWidth / 2;
-        this.bar.x = Phaser.Math.Clamp(pointerX, barHalfWidth, GAME_WIDTH - barHalfWidth);
+        this.bar.x = Phaser.Math.Clamp(gamePointer.x, barHalfWidth, GAME_WIDTH - barHalfWidth);
 
-        // --- Boosting Logic with Expansion Phase ---
+
+        // --- Boosting Logic ---
         if (this.isPointerDown && this.boost > 0 && !this.isBoosting && !this.isShrinkingFromBoost) {
             this.isBoosting = true;
             this.isExpandingToBoost = true;
             this.expandStartTime = time;
             this.scaleOnBoostStart = this.bar.scaleX;
         }
-
         if (this.isBoosting) {
             this.boost -= BOOST_CONSUMPTION_RATE * (delta / 1000);
             this.boost = Math.max(0, this.boost);
         }
-
         if ((!this.isPointerDown || this.boost <= 0) && this.isBoosting) {
              this.isBoosting = false;
              this.isExpandingToBoost = false;
@@ -248,11 +280,9 @@ class GameScene extends Phaser.Scene {
          // --- Rhythm & Bar Scaling ---
         const timeSinceLastBeat = (time - this.lastBeatTime);
         const beatProgress = (timeSinceLastBeat % BEAT_INTERVAL_MS) / BEAT_INTERVAL_MS;
-        const pulseAmount = (Math.cos(beatProgress * Math.PI * 2) + 1) / 2; // Peaks ON the beat
+        const pulseAmount = (Math.cos(beatProgress * Math.PI * 2) + 1) / 2;
         const baseTargetScaleX = BAR_MIN_SCALE_X + (BAR_MAX_SCALE_X - BAR_MIN_SCALE_X) * pulseAmount;
-
         let finalTargetScaleX = baseTargetScaleX;
-
         if (this.isExpandingToBoost) {
             const elapsedExpandTime = time - this.expandStartTime;
             if (elapsedExpandTime < BOOST_EXPAND_DURATION) {
@@ -276,29 +306,17 @@ class GameScene extends Phaser.Scene {
                 finalTargetScaleX = baseTargetScaleX;
             }
         }
-
         if (!isNaN(finalTargetScaleX)) {
              this.bar.scaleX = finalTargetScaleX;
         } else {
              if (this.updateCounter % 60 === 1) console.warn("finalTargetScaleX is NaN!");
              this.bar.scaleX = 1;
         }
-
-        // --- Beat Synchronization Check (Visual Only) ---
-        if (timeSinceLastBeat >= BEAT_INTERVAL_MS) {
-             this.lastBeatTime = time;
-        }
+        if (timeSinceLastBeat >= BEAT_INTERVAL_MS) { this.lastBeatTime = time; }
 
         // --- Update UI Bars ---
-        if (this.boostMeterFill && this.boostMeterBg) {
-             this.boostMeterFill.width = Phaser.Math.Clamp((this.boost / BOOST_MAX), 0, 1) * this.boostMeterBg.width;
-        }
-        if (this.lifeMeterFill && this.lifeMeterBg) {
-             const lifePercent = Phaser.Math.Clamp((this.currentLife / LIFE_MAX), 0, 1);
-             this.lifeMeterFill.width = lifePercent * this.lifeMeterBg.width;
-        }
-
-        // --- Update Score Text ---
+        if (this.boostMeterFill && this.boostMeterBg) { this.boostMeterFill.width = Phaser.Math.Clamp((this.boost / BOOST_MAX), 0, 1) * this.boostMeterBg.width; }
+        if (this.lifeMeterFill && this.lifeMeterBg) { const lifePercent = Phaser.Math.Clamp((this.currentLife / LIFE_MAX), 0, 1); this.lifeMeterFill.width = lifePercent * this.lifeMeterBg.width; }
         if (this.scoreText) { this.scoreText.setText('Score: ' + this.score); }
 
         // --- Item Cleanup & Life Loss ---
@@ -318,24 +336,22 @@ class GameScene extends Phaser.Scene {
          // --- Game Over Check ---
          if (this.currentLife <= 0 && !this.isGameOver) {
              this.triggerGameOver();
-             return; // Stop further updates this frame
+             return;
          }
     }
 
     createSingleItem(x, y, itemType) {
+        // (createSingleItem remains the same)
         const item = this.items.get(x, y);
         if (item) {
             item.setActive(true).setVisible(true);
             item.itemType = itemType;
-
             let itemColor = ITEM_COLOR_POINTS;
             if (itemType === 'boost') { itemColor = ITEM_COLOR_BOOST; }
             else if (itemType === 'life') { itemColor = ITEM_COLOR_LIFE; }
             item.setFillStyle(itemColor);
-
             item.setSize(ITEM_SIZE, ITEM_SIZE);
             item.setDisplaySize(ITEM_SIZE, ITEM_SIZE);
-
             this.physics.world.enable(item);
             if(item.body) {
                 item.body.enable = true;
@@ -349,19 +365,17 @@ class GameScene extends Phaser.Scene {
 
 
     spawnItem() {
+        // (spawnItem remains the same)
+        if (this.gameState !== 'playing' || this.isGameOver) return;
         try {
             let itemType = 'points';
             const rand = Phaser.Math.FloatBetween(0, 1);
             const lifeProb = ITEM_TYPE_PROBABILITY.life;
             const boostProb = ITEM_TYPE_PROBABILITY.boost;
-
             if (rand < lifeProb) { itemType = 'life'; }
             else if (rand < lifeProb + boostProb) { itemType = 'boost'; }
-            // else it remains 'points'
 
-            // --- Use currentPairChance for difficulty scaling ---
             if (Phaser.Math.FloatBetween(0, 1) < this.currentPairChance) {
-                // Spawn a pair (both same type)
                 const minSpread = (BAR_BASE_WIDTH * BAR_MAX_SCALE_X) + ITEM_SIZE * 0.5;
                 const maxSpread = (BAR_BASE_WIDTH * BOOST_MAX_SCALE_X) - ITEM_SIZE * 1.5;
                 const safeMaxSpread = Math.max(minSpread + ITEM_SIZE, maxSpread);
@@ -378,99 +392,56 @@ class GameScene extends Phaser.Scene {
                          this.createSingleItem(x2, y, itemType);
                     } else { this.createSingleItem(Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2), -ITEM_SIZE, itemType); }
                 } else { this.createSingleItem(Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2), -ITEM_SIZE, itemType); }
-            } else {
-                // Spawn a single item
-                const x = Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2);
-                const y = -ITEM_SIZE;
-                this.createSingleItem(x, y, itemType);
-            }
+            } else { this.createSingleItem(Phaser.Math.Between(ITEM_SIZE / 2, GAME_WIDTH - ITEM_SIZE / 2), -ITEM_SIZE, itemType); }
         } catch (error) { console.error("ERROR in spawnItem:", error); }
     }
 
 
     handleCatch(bar, item) {
-        if (item && item.active) {
-             // --- Play Catch Sound ---
-             // this.sound.play('catchSound', { volume: 0.7 });
-             // ---
-
-             let gainedScore = 0; // Track score gained this catch
-
-             // Check item type for reward
-             if (item.itemType === 'points') {
-                 this.score += 10;
-                 gainedScore = 10; // Record score gain for level check
-             } else if (item.itemType === 'boost') {
-                 this.boost = Math.min(BOOST_MAX, this.boost + BOOST_RECHARGE_ON_CATCH);
-             } else if (item.itemType === 'life') {
-                 this.currentLife = Math.min(LIFE_MAX, this.currentLife + LIFE_REPLENISH_ON_CATCH);
-             }
-
-             // Recycle the caught item
-             this.items.killAndHide(item);
-             if (item.body) {
-                 item.body.stop();
-                 item.body.enable = false;
-             }
-
-             // --- NEW: Check for Level Up ---
-             if (gainedScore > 0) { // Only check if score actually increased
-                 this.checkForLevelUp();
-             }
-             // ---
-        }
+        // (handleCatch remains the same)
+         if (this.gameState !== 'playing' || this.isGameOver || !item || !item.active) { return; }
+         let gainedScore = 0;
+         if (item.itemType === 'points') { this.score += 10; gainedScore = 10; }
+         else if (item.itemType === 'boost') { this.boost = Math.min(BOOST_MAX, this.boost + BOOST_RECHARGE_ON_CATCH); }
+         else if (item.itemType === 'life') { this.currentLife = Math.min(LIFE_MAX, this.currentLife + LIFE_REPLENISH_ON_CATCH); }
+         this.items.killAndHide(item);
+         if (item.body) { item.body.stop(); item.body.enable = false; }
+         if (gainedScore > 0) { this.checkForLevelUp(); }
     }
 
-    // --- NEW: Level Up Check Function ---
     checkForLevelUp() {
-        // Check if there's a next level defined and if score meets the threshold
-        if (this.currentLevel <= LEVEL_THRESHOLDS.length &&
-            this.score >= LEVEL_THRESHOLDS[this.currentLevel - 1]) {
-            this.levelUp();
-        }
+        // (checkForLevelUp remains the same)
+        if (this.gameState !== 'playing' || this.isGameOver) return;
+        if (this.currentLevel <= LEVEL_THRESHOLDS.length && this.score >= LEVEL_THRESHOLDS[this.currentLevel - 1]) { this.levelUp(); }
     }
 
-    // --- NEW: Level Up Logic Function ---
     levelUp() {
-        const levelReached = this.currentLevel + 1; // The level we are entering
-        const scoreThreshold = LEVEL_THRESHOLDS[this.currentLevel - 1]; // The score just passed
+        // (levelUp remains the same)
+        if (this.gameState !== 'playing' || this.isGameOver) return;
+        const levelReached = this.currentLevel + 1;
+        const scoreThreshold = LEVEL_THRESHOLDS[this.currentLevel - 1];
         console.log(`Level Up! Reached Level ${levelReached} at score ${this.score} (Threshold: ${scoreThreshold})`);
-
-        this.currentLevel = levelReached; // Increment level counter
-
-        // Display Badge (DOM Manipulation)
-        const badgeContainer = document.getElementById('badges-container');
-        if (badgeContainer) {
-            const badgeElement = document.createElement('p');
-            // Display the level number achieved and the score it was achieved at
-            badgeElement.textContent = `Level ${this.currentLevel -1} Reached (Score: ${scoreThreshold})`;
-            badgeContainer.appendChild(badgeElement);
-        } else {
-            console.warn("Badge container div not found in HTML.");
+        this.currentLevel = levelReached;
+        this.cameras.main.flash(LEVEL_UP_FLASH_DURATION, 255, 255, 255);
+        if (this.levelUpText) {
+            this.levelUpText.setText('Level ' + this.currentLevel);
+            this.levelUpText.setAlpha(1); this.levelUpText.setVisible(true);
+            this.tweens.add({ targets: this.levelUpText, alpha: 0, duration: LEVEL_UP_TEXT_FADE_DURATION, delay: LEVEL_UP_TEXT_FADE_DELAY, onComplete: () => { if(this.levelUpText) this.levelUpText.setVisible(false); } });
         }
-
-        // Increase Difficulty
-        // 1. Increase spawn rate (decrease delay)
         const newDelay = Math.max(MIN_ITEM_SPAWN_RATE_MS, BASE_ITEM_SPAWN_RATE_MS - (this.currentLevel - 1) * ITEM_SPAWN_RATE_DECREASE_PER_LEVEL);
-        if (this.itemSpawnTimer) {
-            this.itemSpawnTimer.delay = newDelay;
-            console.log(`Level ${this.currentLevel}: Spawn delay reduced to ${newDelay}ms`);
-        }
-
-        // 2. Increase pair spawn chance
+        if (this.itemSpawnTimer) { this.itemSpawnTimer.delay = newDelay; console.log(`Level ${this.currentLevel}: Spawn delay reduced to ${newDelay}ms`); }
         this.currentPairChance = Math.min(MAX_ITEM_SPAWN_PAIR_CHANCE, BASE_ITEM_SPAWN_PAIR_CHANCE + (this.currentLevel - 1) * ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL);
         console.log(`Level ${this.currentLevel}: Pair spawn chance increased to ${(this.currentPairChance * 100).toFixed(0)}%`);
-
-        // Add other difficulty increases here (e.g., item speed) if desired
     }
 
 
     triggerGameOver() {
+        // (triggerGameOver remains the same)
+        if (this.isGameOver || this.gameState === 'prestart') return;
         console.log("GAME OVER triggered!");
-        this.isGameOver = true;
-
+        this.gameState = 'gameover'; this.isGameOver = true;
         this.physics.pause();
-        this.itemSpawnTimer.paused = true;
+        if(this.itemSpawnTimer) this.itemSpawnTimer.paused = true;
         this.sound.stopByKey('beatSound');
         if (this.lifeMeterFill) this.lifeMeterFill.width = 0;
         if(this.gameOverText) this.gameOverText.setVisible(true);
@@ -478,11 +449,18 @@ class GameScene extends Phaser.Scene {
 }
 
 // --- Phaser Game Configuration ---
+// --- MODIFIED: Added scale object ---
 const config = {
     type: Phaser.AUTO,
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
-    parent: 'phaser-game', // Optional: If you have a div with id="phaser-game" in your HTML
+    width: GAME_WIDTH,  // Design width
+    height: GAME_HEIGHT, // Design height
+    parent: 'phaser-game', // Optional: ID of a div to contain the canvas
+    scale: {
+        mode: Phaser.Scale.FIT, // Scale to fit within parent/window
+        autoCenter: Phaser.Scale.CENTER_BOTH, // Center horizontally and vertically
+        width: GAME_WIDTH, // Tell scaler the design width
+        height: GAME_HEIGHT // Tell scaler the design height
+    },
     physics: {
         default: 'arcade',
         arcade: { gravity: { y: 0 }, debug: false }
@@ -490,6 +468,7 @@ const config = {
     audio: { disableWebAudio: false },
     scene: [GameScene]
 };
+// ---
 
 console.log("Creating Phaser game instance...");
 try {
