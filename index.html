@@ -51,7 +51,8 @@ const BOOST_RECHARGE_ON_CATCH = 35;
 const BASE_ITEM_SPAWN_RATE_MS = 1000;
 const MIN_ITEM_SPAWN_RATE_MS = 300;
 const ITEM_SPAWN_RATE_DECREASE_PER_LEVEL = 100;
-const ITEM_SPEED = 150;
+const BASE_ITEM_SPEED = 150;
+const ITEM_SPEED_INCREASE_PER_LEVEL = 30;
 const ITEM_SIZE = 20;
 const BASE_ITEM_SPAWN_PAIR_CHANCE = 0.15;
 const MAX_ITEM_SPAWN_PAIR_CHANCE = 0.50;
@@ -111,6 +112,7 @@ class GameScene extends Phaser.Scene {
         this.levelUpText = null;
         this.gameState = 'prestart';
         this.startButton = null;
+        this.currentItemSpeed = BASE_ITEM_SPEED;
     }
 
     preload() {
@@ -354,7 +356,7 @@ class GameScene extends Phaser.Scene {
                 item.body.enable = true;
                 item.body.reset(x, y);
                 item.body.setSize(ITEM_SIZE, ITEM_SIZE);
-                item.body.velocity.y = ITEM_SPEED;
+                item.body.velocity.y = this.currentItemSpeed;
             } else { console.error("Item body not available after creation/reuse!"); }
         } else { console.warn("Failed to create/reuse item"); }
         return item;
@@ -425,6 +427,17 @@ class GameScene extends Phaser.Scene {
         if (this.itemSpawnTimer) { this.itemSpawnTimer.delay = newDelay; console.log(`Level ${this.currentLevel}: Spawn delay reduced to ${newDelay}ms`); }
         this.currentPairChance = Math.min(MAX_ITEM_SPAWN_PAIR_CHANCE, BASE_ITEM_SPAWN_PAIR_CHANCE + (this.currentLevel - 1) * ITEM_SPAWN_PAIR_INCREASE_PER_LEVEL);
         console.log(`Level ${this.currentLevel}: Pair spawn chance increased to ${(this.currentPairChance * 100).toFixed(0)}%`);
+        
+        // Update item speed based on level
+        this.currentItemSpeed = BASE_ITEM_SPEED + (this.currentLevel - 1) * ITEM_SPEED_INCREASE_PER_LEVEL;
+        console.log(`Level ${this.currentLevel}: Item speed increased to ${this.currentItemSpeed}`);
+        
+        // Update existing items' speed to match the new level speed
+        this.items.children.each(item => {
+            if (item.active && item.body) {
+                item.body.velocity.y = this.currentItemSpeed;
+            }
+        });
     }
 
 
