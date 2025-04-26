@@ -212,7 +212,6 @@ class GameScene extends Phaser.Scene {
     }
 
     startGame() {
-        // (startGame remains the same)
         if (this.gameState !== 'prestart') { return; }
         console.log("Starting game...");
         this.gameState = 'playing';
@@ -238,7 +237,6 @@ class GameScene extends Phaser.Scene {
 
 
     update(time, delta) {
-        // (Update logic remains the same)
         if (this.gameState !== 'playing' || this.isGameOver) {
             return;
         }
@@ -341,7 +339,6 @@ class GameScene extends Phaser.Scene {
     }
 
     createSingleItem(x, y, itemType) {
-        // (createSingleItem remains the same)
         const item = this.items.get(x, y);
         if (item) {
             item.setActive(true).setVisible(true);
@@ -365,7 +362,6 @@ class GameScene extends Phaser.Scene {
 
 
     spawnItem() {
-        // (spawnItem remains the same)
         if (this.gameState !== 'playing' || this.isGameOver) return;
         try {
             let itemType = 'points';
@@ -398,7 +394,6 @@ class GameScene extends Phaser.Scene {
 
 
     handleCatch(bar, item) {
-        // (handleCatch remains the same)
          if (this.gameState !== 'playing' || this.isGameOver || !item || !item.active) { return; }
          let gainedScore = 0;
          if (item.itemType === 'points') { this.score += 10; gainedScore = 10; }
@@ -410,13 +405,11 @@ class GameScene extends Phaser.Scene {
     }
 
     checkForLevelUp() {
-        // (checkForLevelUp remains the same)
         if (this.gameState !== 'playing' || this.isGameOver) return;
         if (this.currentLevel <= LEVEL_THRESHOLDS.length && this.score >= LEVEL_THRESHOLDS[this.currentLevel - 1]) { this.levelUp(); }
     }
 
     levelUp() {
-        // (levelUp remains the same)
         if (this.gameState !== 'playing' || this.isGameOver) return;
         const levelReached = this.currentLevel + 1;
         const scoreThreshold = LEVEL_THRESHOLDS[this.currentLevel - 1];
@@ -436,7 +429,6 @@ class GameScene extends Phaser.Scene {
 
 
     triggerGameOver() {
-        // (triggerGameOver remains the same)
         if (this.isGameOver || this.gameState === 'prestart') return;
         console.log("GAME OVER triggered!");
         this.gameState = 'gameover'; this.isGameOver = true;
