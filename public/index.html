@@ -113,21 +113,33 @@ class GameScene extends Phaser.Scene {
         this.gameState = 'prestart';
         this.startButton = null;
         this.currentItemSpeed = BASE_ITEM_SPEED;
+        this.beatSound = null;
     }
 
     preload() {
-        // (Preload remains the same)
         console.log("preload starting");
-        this.load.audio('beatSound', 'https://urbg-rnilsarks-projects.vercel.app/assets/beat.mp3');
-        // this.load.audio('catchSound', 'assets/pop.mp3');
+        
+        // Proper relative path - works in both development and production
+        this.load.audio('beatSound', 'assets/beat.mp3');
+        
         console.log("preload finished");
     }
 
     create() {
-        // (Create logic remains largely the same, positioning is relative to GAME_WIDTH/HEIGHT)
         console.log("create starting");
         this.cameras.main.setBackgroundColor('#1a1a1a');
         this.gameState = 'prestart';
+
+        // Set up audio with proper error handling
+        try {
+            this.beatSound = this.sound.add('beatSound', { 
+                volume: 0.5,
+                loop: true
+            });
+            console.log("Beat sound initialized successfully");
+        } catch (e) {
+            console.error("Could not initialize beat sound:", e);
+        }
 
         // --- Player Bar ---
         this.bar = this.add.rectangle(GAME_WIDTH / 2, BAR_Y_POSITION, BAR_BASE_WIDTH, BAR_BASE_HEIGHT, BAR_COLOR);
@@ -227,8 +239,30 @@ class GameScene extends Phaser.Scene {
         this.lifeMeterBg.setVisible(true);
         this.lifeMeterFill.setVisible(true);
 
-        this.sound.play('beatSound', { loop: true, volume: 0.5 });
-        console.log("Looping beat sound started.");
+        // Play the beat sound properly
+        if (this.beatSound) {
+            try {
+                this.beatSound.play();
+                console.log("Beat sound playing");
+            } catch (e) {
+                console.error("Error playing beat sound:", e);
+                // Don't use absolute URL fallbacks
+            }
+        } else {
+            console.error("Beat sound not available!");
+            
+            // Try to create it now if it wasn't created in create()
+            try {
+                this.beatSound = this.sound.add('beatSound', { 
+                    volume: 0.5,
+                    loop: true
+                });
+                this.beatSound.play();
+                console.log("Beat sound created and playing on second try");
+            } catch (e) {
+                console.error("Second attempt to create beat sound failed:", e);
+            }
+        }
 
         if (this.itemSpawnTimer) {
             this.itemSpawnTimer.paused = false;
@@ -242,7 +276,7 @@ class GameScene extends Phaser.Scene {
         if (this.gameState !== 'playing' || this.isGameOver) {
             return;
         }
-
+        
         this.updateCounter++;
         if (!this.bar || !this.bar.body) { return; }
 
@@ -447,7 +481,17 @@ class GameScene extends Phaser.Scene {
         this.gameState = 'gameover'; this.isGameOver = true;
         this.physics.pause();
         if(this.itemSpawnTimer) this.itemSpawnTimer.paused = true;
-        this.sound.stopByKey('beatSound');
+        
+        // Safely stop the beat sound
+        try {
+            if (this.beatSound) {
+                this.beatSound.stop();
+                console.log("Beat sound stopped");
+            }
+        } catch (error) {
+            console.error("Error stopping beat sound:", error);
+        }
+        
         if (this.lifeMeterFill) this.lifeMeterFill.width = 0;
         if(this.gameOverText) this.gameOverText.setVisible(true);
     }
@@ -470,7 +514,10 @@ const config = {
         default: 'arcade',
         arcade: { gravity: { y: 0 }, debug: false }
     },
-    audio: { disableWebAudio: false },
+    audio: { 
+        disableWebAudio: false,
+        noAudio: false
+    },
     scene: [GameScene]
 };
 // ---

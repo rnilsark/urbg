@@ -9,8 +9,8 @@
       ]
     },
     "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git"]
-    }
+        "command": "uvx",
+        "args": ["mcp-server-git"]
+      }
   }
 }
