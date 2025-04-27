@@ -1,24 +1,25 @@
-/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Ensures phaser works correctly with webpack 5
   webpack: (config) => {
-    config.resolve.fallback = { 
-      ...config.resolve.fallback, 
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
       fs: false,
       path: false,
     };
     return config;
   },
-  // Add rewrites to serve the static HTML directly
   async rewrites() {
     return [
       {
+        source: '/api/:path*',
+        destination: '/api/:path*', // ✨ Don't touch API paths!
+      },
+      {
         source: '/',
-        destination: '/index.html',
+        destination: '/index.html', // Static HTML game
       },
     ];
   },
 };
 
-export default nextConfig; 
+export default nextConfig;
