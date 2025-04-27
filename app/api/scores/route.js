@@ -12,7 +12,7 @@ pool.on('error', (err) => {
 });
 
 // Get top scores
-export async function GET() {
+export async function GET(request) {
   try {
     console.log('Attempting to fetch scores from database...');
     const result = await pool.query(
@@ -34,7 +34,8 @@ export async function GET() {
 // Submit a new score
 export async function POST(request) {
   try {
-    const { name, score } = await request.json();
+    const body = await request.json();
+    const { name, score } = body;
     
     if (!name || !score) {
       return NextResponse.json({ error: 'Name and score are required' }, { status: 400 });
