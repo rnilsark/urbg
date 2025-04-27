@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Rhythm Bar Game - Code Documentation
+
+## Architecture Overview
+This is a browser-based rhythm game built with Phaser 3. The player controls a horizontal bar that expands and contracts to the rhythm, catching falling items for points.
+
+## Development
+Make small git commits with thoughtful comments while editing
+
+
